@@ -1,10 +1,10 @@
 #TODO:
-#remove self.counter
 #disable toolbar during a game
 #Points
 #COMMENT CODE
 #Fixed Window Size
-#rafi !> ben
+#Get MultiPlayer working
+#Do not cycle through entire UserMoves list after every click
 #------------
 #Laugh at 0 points
 #new graphical shpill
@@ -19,8 +19,9 @@ QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True) #Scales to other dev
 class MainWindow(QMainWindow):
     def __init__(self):
         self.InitialDelay = 1000
-        self.FlashOnDelay = 250
+        self.FlashOnDelay = 150
         self.FlashOffDelay = 650
+        self.GameOverFlashDelay = 200
         self.SoundDelay = 20
         self.GameMode = "Classic"
         
@@ -29,7 +30,6 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"background-color: black;")
         
         self.toolbar = QToolBar("MainBar")
-        #self.toolbar.setStyleSheet(f"background-color: ;")
         self.addToolBar(self.toolbar)
         self.toolbar.setMovable(False)
         self.toolbar.toggleViewAction().setEnabled(False)
@@ -37,12 +37,12 @@ class MainWindow(QMainWindow):
         GameModeLabel = QLabel("GameMode")
         GameModeLabel.setFont(QFont("Arial", 10))
         GameModeLabel.setStyleSheet("color: white;")
-        GameModeLabel.setContentsMargins(10, 5, 5, 5)
+        GameModeLabel.setContentsMargins(10, 5, 15, 5) #left, up, right, down
         self.toolbar.addWidget(GameModeLabel)
         
         self.GameModeCombo = QComboBox()
         self.GameModeCombo.addItems(["Classic", "Multiplayer", "Blind"])
-        self.GameModeCombo.setStyleSheet("font-size: 10pt; selection-background-color: black; color: white;")
+        self.GameModeCombo.setStyleSheet("font-size: 10pt; selection-background-color: black; border-color: grey; color: white; border: 2px solid #616A6B;")
         self.GameModeCombo.currentTextChanged.connect(self.GameModeChanged)
         self.toolbar.addWidget(self.GameModeCombo)
         
@@ -98,27 +98,11 @@ class MainWindow(QMainWindow):
         
         if self.GameMode == "Blind":
             self.BlindModeSequence = [self.GreenButton, self.RedButton, self.YellowButton, self.BlueButton]
-            self.BlindModeFlashOn(0)
+            QTimer.singleShot(self.InitialDelay, lambda: self.FlashButtonOn("BlindModeInitial"))
         else:
             self.AddMove()
             QTimer.singleShot(self.InitialDelay, self.FlashButtonOn)
-                
-    def BlindModeFlashOn(self, Counter):
-        if Counter < len(self.BlindModeSequence):
-            Button = self.BlindModeSequence[Counter]
-            threading.Thread(target = QTimer.singleShot(self.SoundDelay, lambda: playsound(Button.SoundName))).start() 
-            Button.setStyleSheet(f"background-color: {Button.FlashColour};")
-            Counter = Counter + 1
-            QTimer.singleShot(self.FlashOffDelay, lambda: self.BlindModeFlashOff(Button, Counter))
-        else:
-            threading.Thread(target = QTimer.singleShot(self.SoundDelay, lambda: playsound("BlindStart.wav"))).start()
-            self.AddMove()
-            QTimer.singleShot(self.InitialDelay, self.FlashButtonOn)
-    
-    def BlindModeFlashOff(self, Button, Counter):
-        Button.setStyleSheet(f"background-color: {Button.Colour};")
-        QTimer.singleShot(self.FlashOnDelay + 100, lambda: self.BlindModeFlashOn(Counter))
-        
+
     def AddMove(self, Button = None):
         self.PlayerMoves = []
         self.ChangeButtonState(False)
@@ -126,7 +110,6 @@ class MainWindow(QMainWindow):
             Possibilities = [self.GreenButton, self.RedButton, self.YellowButton, self.BlueButton]        
             Button = random.choice(Possibilities)
         self.NeededMoves.append(Button)
-        self.NeededMovesIter = iter(self.NeededMoves)
         
     def PlayerButtonPressed(self, Button):
         Button.setStyleSheet(f"background-color: {Button.FlashColour};")
@@ -149,49 +132,64 @@ class MainWindow(QMainWindow):
         if SequenceValid == False:
             self.GameOver()
     
-    def FlashButtonOn(self):
-        try:
-            Button = next(self.NeededMovesIter)
-        except StopIteration:
-            self.ChangeButtonState(True)
+    def FlashButtonOn(self, Mode="Normal", Counter = 0):
+        if Mode == "GameOver":
+            MovesList = self.GameOverMoves
+            FlashTime = self.GameOverFlashDelay
+            
+            if Counter == 0:
+                threading.Thread(target = lambda: playsound("GameOver.mp3")).start()
+                
+        elif Mode == "BlindModeInitial":
+            MovesList = self.BlindModeSequence
+            FlashTime = self.FlashOffDelay
         else:
-            FlashTime = self.FlashOffDelay * max(0.4, 1 - ((len(self.NeededMoves) // 10) / 5))
-            if self.GameMode != "Blind":
+            MovesList = self.NeededMoves
+            FlashTime = self.FlashOffDelay * max(0.4, 1 - ((len(MovesList) // 10) / 5))
+        
+        if Counter < len(MovesList):                
+            Button = MovesList[Counter]
+
+            if self.GameMode != "Blind" or Mode == "BlindModeInitial" or Mode == "GameOver":
                 Button.setStyleSheet(f"background-color: {Button.FlashColour};")
-            threading.Thread(target = QTimer.singleShot(self.SoundDelay, lambda: playsound(Button.SoundName))).start() 
-            QTimer.singleShot(FlashTime, lambda: self.FlashButtonOff(Button))
+            
+            if Mode != "GameOver":
+                threading.Thread(target = QTimer.singleShot(self.SoundDelay, lambda: playsound(Button.SoundName))).start()
+                
+            Counter = Counter + 1
+            QTimer.singleShot(FlashTime, lambda: self.FlashButtonOff(Mode, Button, Counter))
+        else:
+            if Mode == "GameOver":
+                QTimer.singleShot(0, lambda: MovesList[0].setStyleSheet(f"background-color: {MovesList[0].FlashColour};"))
+                self.StartButton.setEnabled(True)
+                self.StartButton.setStyleSheet("background-color: white;")
+            elif Mode == "BlindModeInitial":
+                threading.Thread(target = QTimer.singleShot(self.SoundDelay, lambda: playsound("BlindStart.wav"))).start()
+                self.AddMove()
+                QTimer.singleShot(self.InitialDelay, self.FlashButtonOn)
+            else:
+                self.ChangeButtonState(True)
+            
     
-    def FlashButtonOff(self, Button):
-        FlashTime = self.FlashOnDelay * max(0.4, 1 - ((len(self.NeededMoves) // 10) / 5))
-        if self.GameMode != "Blind":
+    def FlashButtonOff(self, Mode, Button, Counter):
+        if Mode == "GameOver":
+            FlashTime = self.GameOverFlashDelay
+        else:
+            FlashTime = self.FlashOnDelay * max(0.4, 1 - ((len(self.NeededMoves) // 10) / 5))
+            
+        if self.GameMode != "Blind" or Mode == "BlindModeInitial" or Mode == "GameOver":
             Button.setStyleSheet(f"background-color: {Button.Colour};")
-        QTimer.singleShot(FlashTime, lambda: self.FlashButtonOn())
+            
+        QTimer.singleShot(FlashTime, lambda: self.FlashButtonOn(Mode, Counter))
         
     def GameOver(self):
         Button = self.NeededMoves[self.IndexFail]
         self.ChangeButtonState(False)
         print("You Idiot")
-        self.Counter = 1
-        self.GameOverDelay = 0
-        self.GameOverFlashOn(Button)
+        self.GameOverMoves = [Button, Button, Button]
+        self.FlashButtonOn("GameOver")
 
-    def GameOverFlashOn(self, Button):
-        if self.Counter < 3:
-            if self.Counter == 1:
-                threading.Thread(target = lambda: playsound("GameOver.mp3")).start()
-            Button.setStyleSheet(f"background-color: {Button.FlashColour};")
-            self.Counter = self.Counter + 1
-            self.GameOverDelay = self.GameOverDelay + 100
-            QTimer.singleShot(self.GameOverDelay, lambda: self.GameOverFlashOff(Button))
-        else:
-            QTimer.singleShot(0, lambda: Button.setStyleSheet(f"background-color: {Button.FlashColour};"))
-            self.StartButton.setEnabled(True)
-            self.StartButton.setStyleSheet("background-color: white;")
-    
-    def GameOverFlashOff(self, Button):
-        Button.setStyleSheet(f"background-color: {Button.Colour};")
-        QTimer.singleShot(self.GameOverDelay + 100, lambda: self.GameOverFlashOn(Button))
-
+ 
 #         PlayAgain = QMessageBox()
 #         PlayAgain.setWindowTitle("Restart Game")
 #         PlayAgain.setText(Text)
